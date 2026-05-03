@@ -1,5 +1,4 @@
 services:
-  # The Python Backend
   - type: web
     name: regimevision-backend
     env: python
@@ -9,7 +8,6 @@ services:
       - key: PYTHON_VERSION
         value: 3.12.0
 
-  # The React Frontend
   - type: web
     name: regimevision-frontend
     env: static
