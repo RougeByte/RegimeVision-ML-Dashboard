@@ -3,7 +3,6 @@ services:
   - type: web
     name: regimevision-backend
     env: python
-    # We navigate into the backend folder to install requirements and build Go
     buildCommand: pip install -r backend/requirements.txt && go build -o backend/ingestor backend/ingestor.go
     startCommand: uvicorn backend.main:app --host 0.0.0.0 --port $PORT
     envVars:
@@ -14,5 +13,7 @@ services:
   - type: web
     name: regimevision-frontend
     env: static
-    buildCommand: cd frontend && npm install && npm run build
-    publishPath: frontend/dist
+    buildCommand: npm install && npm run build
+    publishPath: dist
+    # This tells Render to run the commands inside the frontend folder
+    rootDir: frontend
