@@ -1,0 +1,18 @@
+# Python
+__pycache__/
+*.pyc
+venv/
+.env
+
+# Go
+bin/
+cache_data/  # IMPORTANT: Don't push the 100s of CSV files you downloaded
+
+# React
+node_modules/
+dist/
+.eslintcache
+
+# OS
+.DS_Store
+Thumbs.db
