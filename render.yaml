@@ -13,7 +13,6 @@ services:
   - type: web
     name: regimevision-frontend
     env: static
+    rootDir: frontend
     buildCommand: npm install && npm run build
     publishPath: dist
-    # This tells Render to run the commands inside the frontend folder
-    rootDir: frontend
