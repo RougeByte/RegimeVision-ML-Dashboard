@@ -41,21 +41,25 @@ def get_cached_data(ticker: str):
     return None
 
 def fetch_data_with_go(ticker: str):
-    """Calls the Go Ingestor microservice."""
     try:
-        print(f"--- 🚀 Level 2: Orchestrating Go for {ticker} ---")
+        # Use the absolute path or ensure we are in the correct WORKDIR
+        # Since the Dockerfile copies everything to /app, we use that
+        script_path = os.path.join(os.getcwd(), "backend", "ingestor.go")
+        
+        # If you built the binary in the Dockerfile (recommended), call the binary instead:
+        binary_path = os.path.join(os.getcwd(), "backend", "ingestor")
+        
+        command = [binary_path, ticker] if os.path.exists(binary_path) else ["go", "run", script_path, ticker]
+        
         result = subprocess.run(
-            ["go", "run", "ingestor.go", ticker], 
+            command, 
             capture_output=True, 
             text=True, 
-            check=True,
-            encoding="utf-8",
-            errors="replace"
+            check=True
         )
-        print(result.stdout)
         return True
     except Exception as e:
-        print(f"❌ Go Orchestration Error: {e}")
+        print(f"❌ Go Error: {e}")
         return False
 
 @app.get("/api/regimes/{ticker}")
