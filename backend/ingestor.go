@@ -25,15 +25,23 @@ func main() {
 import yfinance as yf
 import os
 import sys
+import requests
 
 ticker = "%s"
 cache_dir = "%s"
+
+# Setup a session with a real browser User-Agent
+session = requests.Session()
+session.headers.update({
+    'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36'
+})
 
 try:
     if not os.path.exists(cache_dir):
         os.makedirs(cache_dir)
     
-    data = yf.download(ticker, period="2y", progress=False)
+    # Pass the session to yfinance
+    data = yf.download(ticker, period="2y", progress=False, session=session)
     
     if data.empty:
         print(f"No data found for {ticker}")
@@ -48,7 +56,7 @@ except Exception as e:
 
 	// CHANGE: use "python3" instead of "python"
 	cmd := exec.Command("python3", "-c", pythonSnippet)
-	
+
 	// Capture both Stdout and Stderr to debug
 	output, err := cmd.CombinedOutput()
 	if err != nil {
