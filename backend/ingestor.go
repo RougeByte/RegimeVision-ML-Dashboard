@@ -54,7 +54,7 @@ except Exception as e:
 	if err != nil {
 		fmt.Printf("❌ Go execution failed: %v\n", err)
 		fmt.Printf("Python Logs: %s\n", string(output))
-		os.exit(1)
+		os.Exit(1)
 	}
 
 	fmt.Printf("✅ [Go] %s synchronized!\n", ticker)
