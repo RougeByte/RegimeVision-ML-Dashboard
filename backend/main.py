@@ -41,13 +41,15 @@ def get_cached_data(ticker: str):
     return None
 
 def fetch_data_with_go(ticker: str):
-    """Calls the pre-compiled Go Ingestor binary."""
     try:
-        print(f"--- 🚀 Level 2: Orchestrating Go Binary for {ticker} ---")
-        
-        # Determine the path to the compiled binary
-        # In Docker, this is /app/backend/ingestor
+        # Path to the binary created by your Dockerfile
         binary_path = os.path.join(os.getcwd(), "backend", "ingestor")
+        
+        # Fallback for local testing if binary doesn't exist
+        if not os.path.exists(binary_path):
+            binary_path = "go run backend/ingestor.go" # local dev only
+            
+        print(f"--- 🚀 Calling Go Binary: {binary_path} for {ticker} ---")
         
         result = subprocess.run(
             [binary_path, ticker], 
@@ -55,13 +57,12 @@ def fetch_data_with_go(ticker: str):
             text=True, 
             check=True
         )
-        print(f"Go Output: {result.stdout}")
         return True
-    except subprocess.CalledProcessError as e:
-        print(f"❌ Go Binary Error: {e.stderr}") # This will show the actual Go error
-        return False
     except Exception as e:
-        print(f"❌ Orchestration Error: {e}")
+        # This will now show the detailed Python logs we added to ingestor.go
+        print(f"❌ Go Orchestration Error: {e}")
+        if hasattr(e, 'stderr'):
+            print(f"Detail: {e.stderr}")
         return False
 
 @app.get("/api/regimes/{ticker}")
