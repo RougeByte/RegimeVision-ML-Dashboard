@@ -25,23 +25,17 @@ func main() {
 import yfinance as yf
 import os
 import sys
-import requests
 
 ticker = "%s"
 cache_dir = "%s"
-
-# Setup a session with a real browser User-Agent
-session = requests.Session()
-session.headers.update({
-    'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36'
-})
 
 try:
     if not os.path.exists(cache_dir):
         os.makedirs(cache_dir)
     
-    # Pass the session to yfinance
-    data = yf.download(ticker, period="2y", progress=False, session=session)
+    # Let YF handle the session internally with curl_cffi
+    # We just specify the ticker and period
+    data = yf.download(ticker, period="2y", progress=False)
     
     if data.empty:
         print(f"No data found for {ticker}")
