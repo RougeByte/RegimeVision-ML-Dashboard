@@ -2,8 +2,9 @@ package main
 
 import (
 	"fmt"
+	"io"
+	"net/http"
 	"os"
-	"os/exec"
 	"path/filepath"
 )
 
@@ -14,55 +15,26 @@ func main() {
 	}
 
 	ticker := os.Args[1]
-	// Get absolute path to ensure we write to the right place in Docker
-	cwd, _ := os.Getwd()
-	cachePath := filepath.Join(cwd, "cache_data")
+	// Get a free key at alphavantage.co
+	apiKey := "YOUR_FREE_KEY" 
+	url := fmt.Sprintf("https://www.alphavantage.co/query?function=TIME_SERIES_DAILY&symbol=%s&apikey=%s&datatype=csv", ticker, apiKey)
 
-	fmt.Printf("[Go Ingestor] Fetching %s via Python Helper...\n", ticker)
-
-	// We use python3 and added error handling inside the python string
-	pythonSnippet := fmt.Sprintf(`
-import yfinance as yf
-import os
-import sys
-
-ticker = "%s"
-cache_dir = "%s"
-
-try:
-    if not os.path.exists(cache_dir):
-        os.makedirs(cache_dir)
-    
-    # Let YF handle the session internally with curl_cffi
-    # We just specify the ticker and period
-    data = yf.download(
-    ticker, 
-    period="2y", 
-    proxy=None, 
-    headers={'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/122.0.0.0 Safari/537.36'}
-)
-    
-    if data.empty:
-        print(f"No data found for {ticker}")
-        sys.exit(1)
-        
-    data.to_csv(os.path.join(cache_dir, f"{ticker.upper()}.csv"))
-    print("Successfully saved data")
-except Exception as e:
-    print(f"Python Error: {e}")
-    sys.exit(1)
-`, ticker, cachePath)
-
-	// CHANGE: use "python3" instead of "python"
-	cmd := exec.Command("python3", "-c", pythonSnippet)
-
-	// Capture both Stdout and Stderr to debug
-	output, err := cmd.CombinedOutput()
+	// Direct Go HTTP request (No Python needed!)
+	resp, err := http.Get(url)
 	if err != nil {
-		fmt.Printf("❌ Go execution failed: %v\n", err)
-		fmt.Printf("Python Logs: %s\n", string(output))
+		fmt.Printf("❌ API Error: %v\n", err)
 		os.Exit(1)
 	}
+	defer resp.Body.Close()
 
-	fmt.Printf("✅ [Go] %s synchronized!\n", ticker)
+	// Ensure the folder exists
+	cacheDir := "backend/cache_data"
+	os.MkdirAll(cacheDir, 0777)
+
+	// Save the file
+	out, _ := os.Create(filepath.Join(cacheDir, fmt.Sprintf("%s.csv", ticker)))
+	defer out.Close()
+	io.Copy(out, resp.Body)
+
+	fmt.Printf("✅ Success: Downloaded %s\n", ticker)
 }
