@@ -35,7 +35,12 @@ try:
     
     # Let YF handle the session internally with curl_cffi
     # We just specify the ticker and period
-    data = yf.download(ticker, period="2y", progress=False)
+    data = yf.download(
+    ticker, 
+    period="2y", 
+    proxy=None, 
+    headers={'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/122.0.0.0 Safari/537.36'}
+)
     
     if data.empty:
         print(f"No data found for {ticker}")
