@@ -119,11 +119,18 @@ def get_market_data(ticker: str):
 
         for col in ['Open', 'High', 'Low', 'Close']:
             df[col] = df[col].astype(float)
+        
+        if len(df) < 20:  # We need at least 20 for the rolling volatility window
+            return {"error": f"Not enough data found for {ticker}. Found only {len(df)} rows."}
 
         # 4. ML Logic
         df['Returns'] = np.log(df['Close'] / df['Close'].shift(1))
         df['Volatility'] = df['Returns'].rolling(window=20).std()
         df = df.dropna()
+
+        # Final check before GMM
+        if df.empty or len(df) < 2:
+            return {"error": "Data became empty after calculating returns/volatility."}
 
         X = df[['Returns', 'Volatility']].values
         model = GaussianMixture(n_components=3, random_state=42)
