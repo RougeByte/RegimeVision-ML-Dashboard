@@ -8,28 +8,46 @@ import (
 
 func main() {
 	if len(os.Args) < 2 {
-		fmt.Println("Usage: go run ingestor.go <TICKER>")
+		fmt.Println("Usage: ./ingestor <TICKER>")
 		return
 	}
 
 	ticker := os.Args[1]
 	fmt.Printf("[Go Ingestor] Fetching %s via Python Helper...\n", ticker)
 
-	// We use Python's yfinance inside Go because it handles the 
-	// Yahoo Finance cookies and headers better than a raw Go request.
-	// This shows you know how to use the best tool for the job.
-	cmd := exec.Command("python", "-c", fmt.Sprintf(`
+	// 1. Use 'python3' instead of 'python'
+	// 2. Pass a custom 'proxy' or headers via yfinance if needed,
+	//    but usually, a simple download works if the environment is right.
+	pythonCmd := fmt.Sprintf(`
 import yfinance as yf
 import os
+import pandas as pd
 ticker = "%s"
-data = yf.download(ticker, period="2y")
-if not os.path.exists("cache_data"): os.makedirs("cache_data")
-data.to_csv(f"cache_data/{ticker.upper()}.csv")
-`, ticker))
+try:
+    # Use yfinance to download
+    data = yf.download(ticker, period="2y", progress=False)
+    if data.empty:
+        print(f"Empty data for {ticker}")
+        exit(1)
+    
+    if not os.path.exists("cache_data"): 
+        os.makedirs("cache_data")
+    
+    # Save to CSV
+    data.to_csv(f"cache_data/{ticker.upper()}.csv")
+    print("Success")
+except Exception as e:
+    print(f"Error: {e}")
+    exit(1)
+`, ticker)
 
-	err := cmd.Run()
+	cmd := exec.Command("python3", "-c", pythonCmd)
+
+	// Capture output to see what's happening inside the Python call
+	output, err := cmd.CombinedOutput()
 	if err != nil {
-		fmt.Printf("❌ Error: %v\n", err)
+		fmt.Printf("❌ Python execution failed: %v\n", err)
+		fmt.Printf("Details: %s\n", string(output))
 		return
 	}
 
