@@ -7,6 +7,7 @@ venv/
 # Go
 bin/
 cache_data/  # IMPORTANT: Don't push the 100s of CSV files you downloaded
+backend/cache_data/*.csv
 
 # React
 node_modules/
