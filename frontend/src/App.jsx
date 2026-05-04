@@ -38,7 +38,7 @@ function App() {
   const fetchData = async () => {
     setLoading(true);
     try {
-      const res = await axios.get(`http://localhost:8000/api/regimes/${ticker}`);
+      const res = await axios.get(`https://regimevision-backend1.onrender.com/api/regimes/${ticker}`);
       setData(res.data);
       // PERSISTENCE: Save to localStorage on successful fetch
       localStorage.setItem('selectedTicker', ticker);
