@@ -2,160 +2,116 @@ import os
 import subprocess
 import pandas as pd
 import numpy as np
-from datetime import datetime, timedelta
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 from sklearn.mixture import GaussianMixture
 
 app = FastAPI()
 
-# Configuration
-CACHE_DIR = "cache_data"
-if not os.path.exists(CACHE_DIR):
-    os.makedirs(CACHE_DIR)
-
+# 1. Enable CORS for your Render Frontend
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["*"],
+    allow_origins=["*"],  # Allows your static site to communicate with the API
     allow_methods=["*"],
     allow_headers=["*"],
 )
 
-def get_cached_data(ticker: str):
-    """Checks if a fresh and valid cache file exists."""
-    file_path = os.path.join(CACHE_DIR, f"{ticker.upper()}.csv")
-    if os.path.exists(file_path):
-        try:
-            # Quick check if file is just an error message
-            with open(file_path, 'r') as f:
-                first_line = f.readline()
-                if "Too Many Requests" in first_line or "Edge" in first_line:
-                    return None
-            
-            file_age = datetime.fromtimestamp(os.path.getmtime(file_path))
-            if datetime.now() - file_age < timedelta(hours=24):
-                print(f"--- 💾 Cache Hit: {ticker} ---")
-                return pd.read_csv(file_path)
-        except:
-            return None
-    return None
+# 2. Path Configuration for Docker
+# In Docker, we use absolute paths to ensure Python finds the Go output
+BASE_DIR = "/app"
+CACHE_DIR = os.path.join(BASE_DIR, "backend", "cache_data")
 
 def fetch_data_with_go(ticker: str):
+    """Triggers the pre-compiled Go binary to fetch data."""
     try:
-        # Use absolute path for Docker
-        binary_path = "/app/backend/ingestor"
+        binary_path = os.path.join(BASE_DIR, "backend", "ingestor")
         
-        print(f"--- 🚀 Executing: {binary_path} {ticker} ---")
+        # Ensure the binary exists before running
+        if not os.path.exists(binary_path):
+            print(f"❌ Binary not found at {binary_path}", flush=True)
+            return False
+
+        print(f"--- 🚀 Executing: {binary_path} {ticker} ---", flush=True)
         
-        # Use capture_output=True and check=True
+        # Run the Go binary and capture output for the Render logs
         result = subprocess.run(
-            [binary_path, ticker], 
-            capture_output=True, 
-            text=True, 
+            [binary_path, ticker],
+            capture_output=True,
+            text=True,
             check=True,
-            cwd="/app" # Ensure working directory is root
+            cwd=BASE_DIR
         )
-        print(f"Go Success: {result.stdout}")
+        print(f"Go Success: {result.stdout}", flush=True)
         return True
     except subprocess.CalledProcessError as e:
-        # This will now catch the 'Detail' that was empty before
-        print(f"❌ Go Exit Status {e.returncode}")
-        print(f"STDOUT: {e.stdout}")
-        print(f"STDERR: {e.stderr}")
+        print(f"❌ Go Exit Status {e.returncode}", flush=True)
+        print(f"STDOUT: {e.stdout}", flush=True)
+        print(f"STDERR: {e.stderr}", flush=True)
+        return False
+    except Exception as e:
+        print(f"❌ Orchestration Error: {e}", flush=True)
         return False
 
 @app.get("/api/regimes/{ticker}")
-def get_market_data(ticker: str):
+async def get_market_data(ticker: str):
     ticker = ticker.upper()
-    df_raw = get_cached_data(ticker)
     
-    if df_raw is None:
-        success = fetch_data_with_go(ticker)
-        file_path = os.path.join(CACHE_DIR, f"{ticker}.csv")
-        if success and os.path.exists(file_path):
-            df_raw = pd.read_csv(file_path)
-        else:
-            return {"error": "Could not retrieve data."}
+    # Trigger the Go Ingestor
+    success = fetch_data_with_go(ticker)
+    if not success:
+        return {"error": "Could not retrieve data from API."}
+
+    file_path = os.path.join(CACHE_DIR, f"{ticker}.csv")
+    print(f"--- 🔍 Python checking for file at: {file_path} ---", flush=True)
+
+    if not os.path.exists(file_path):
+        return {"error": f"File {ticker}.csv not found after Go execution."}
 
     try:
-        df = df_raw.copy()
-
-        # 1. Clean multi-headers and whitespace
-        df.columns = [str(c).strip().lower() for c in df.columns]
+        # Load data and handle different possible CSV formats
+        df = pd.read_csv(file_path)
         
-        target_col = None
-        for col in ['close', 'adj close', 'price']:
-            if col in df.columns:
-                target_col = col
-                break
+        # Standardize columns to lowercase
+        df.columns = [c.lower().strip() for c in df.columns]
         
-        if not target_col:
-            # Re-read if standard headers failed
-            df = pd.read_csv(os.path.join(CACHE_DIR, f"{ticker}.csv"), header=[0, 1])
-            df.columns = df.columns.get_level_values(0)
-            df.columns = [str(c).strip().lower() for c in df.columns]
-            target_col = 'close'
+        # Rename columns to match what the ML logic expects
+        # Supports both Alpha Vantage and Yahoo Finance headers
+        rename_map = {
+            'timestamp': 'date',
+            'time': 'date',
+            'adjusted close': 'close'
+        }
+        df = df.rename(columns=rename_map)
 
-        # 2. Convert Close to numeric and drop garbage
-        df[target_col] = pd.to_numeric(df[target_col], errors='coerce')
-        df = df.dropna(subset=[target_col])
+        if 'close' not in df.columns:
+            return {"error": f"CSV missing 'close' column. Found: {list(df.columns)}"}
 
-        # 3. Rename and handle Date
-        df = df.rename(columns={target_col: 'Close', 'open': 'Open', 'high': 'High', 'low': 'Low', 'date': 'Date'})
+        # Data Cleaning
+        df['date'] = pd.to_datetime(df['date'])
+        df = df.sort_values('date')
         
-        if 'Date' not in df.columns:
-            df = df.reset_index().rename(columns={df.columns[0]: 'Date'})
-        
-        df['Date'] = pd.to_datetime(df['Date'], errors='coerce')
-        df = df.dropna(subset=['Date'])
-
-        # --- CRITICAL FIX: SORT AND DEDUPE ---
-        # Sort by date ascending (required by lightweight-charts)
-        df = df.sort_values('Date')
-        
-        # Remove duplicate dates (assertion failed: index=1, time=0, prev time=0 often means duplicates)
-        df = df.drop_duplicates(subset=['Date'], keep='last')
-        # -------------------------------------
-
-        for col in ['Open', 'High', 'Low', 'Close']:
-            df[col] = df[col].astype(float)
-        
-        if len(df) < 20:  # We need at least 20 for the rolling volatility window
-            return {"error": f"Not enough data found for {ticker}. Found only {len(df)} rows."}
-
-        # 4. ML Logic
-        df['Returns'] = np.log(df['Close'] / df['Close'].shift(1))
+        # ML Logic: Regime Detection
+        df['Returns'] = np.log(df['close'] / df['close'].shift(1))
         df['Volatility'] = df['Returns'].rolling(window=20).std()
         df = df.dropna()
 
-        # Final check before GMM
-        if df.empty or len(df) < 2:
-            return {"error": "Data became empty after calculating returns/volatility."}
+        if len(df) < 2:
+            return {"error": "Not enough data points for regime analysis."}
 
+        # Prepare features for Gaussian Mixture Model
         X = df[['Returns', 'Volatility']].values
-        model = GaussianMixture(n_components=3, random_state=42)
-        df['Regime'] = model.fit_predict(X)
+        gmm = GaussianMixture(n_components=3, random_state=42)
+        df['Regime'] = gmm.fit_predict(X)
 
-        # 5. Format for React
-        result = []
-        for _, row in df.iterrows():
-            result.append({
-                "time": row['Date'].strftime('%Y-%m-%d'),
-                "open": row['Open'],
-                "high": row['High'],
-                "low": row['Low'],
-                "close": row['Close'],
-                "regime": int(row['Regime'])
-            })
-        
-        return result
+        # Convert back to JSON for the Frontend
+        # We rename columns back to original case for the chart to read easily
+        result_df = df.rename(columns={'date': 'Date', 'close': 'Close'})
+        return result_df[['Date', 'Close', 'Regime']].to_dict(orient='records')
 
     except Exception as e:
-        print(f"Internal Data Error: {e}")
+        print(f"❌ Python Processing Error: {e}", flush=True)
         return {"error": f"Processing failed: {str(e)}"}
 
-if __name__ == "__main__":
-    import uvicorn
-    import os
-    port = int(os.environ.get("PORT",8000))
-    uvicorn.run(app, host="0.0.0.0", port=port)
+@app.get("/health")
+async def health():
+    return {"status": "healthy"}

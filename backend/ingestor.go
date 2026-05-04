@@ -16,7 +16,7 @@ func main() {
 
 	ticker := os.Args[1]
 	// Get a free key at alphavantage.co
-	apiKey := "YOUR_FREE_KEY" 
+	apiKey := "YOUR_FREE_KEY"
 	url := fmt.Sprintf("https://www.alphavantage.co/query?function=TIME_SERIES_DAILY&symbol=%s&apikey=%s&datatype=csv", ticker, apiKey)
 
 	// Direct Go HTTP request (No Python needed!)
