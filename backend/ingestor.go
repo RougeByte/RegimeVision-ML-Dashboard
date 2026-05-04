@@ -6,6 +6,7 @@ import (
 	"net/http"
 	"os"
 	"path/filepath"
+	"strings"
 )
 
 func main() {
@@ -14,27 +15,59 @@ func main() {
 		return
 	}
 
-	ticker := os.Args[1]
-	// Get a free key at alphavantage.co
-	apiKey := "YOUR_FREE_KEY"
+	ticker := strings.ToUpper(os.Args[1])
+	
+	// TODO: Replace with your actual Alpha Vantage API Key
+	// Tip: For production, use os.Getenv("ALPHA_VANTAGE_KEY")
+	apiKey := "8DXOAO2RGIB0H7E3" 
+	
+	// We request 'compact' to get the last 100 days, which is faster and stays under limits
 	url := fmt.Sprintf("https://www.alphavantage.co/query?function=TIME_SERIES_DAILY&symbol=%s&apikey=%s&datatype=csv", ticker, apiKey)
 
-	// Direct Go HTTP request (No Python needed!)
+	fmt.Printf("[Go Ingestor] Fetching %s from Alpha Vantage...\n", ticker)
+
 	resp, err := http.Get(url)
 	if err != nil {
-		fmt.Printf("❌ API Error: %v\n", err)
+		fmt.Printf("❌ Network Error: %v\n", err)
 		os.Exit(1)
 	}
 	defer resp.Body.Close()
 
-	// Ensure the folder exists
-	cacheDir := "backend/cache_data"
-	os.MkdirAll(cacheDir, 0777)
+	// Read the response into memory so we can inspect it
+	bodyBytes, err := io.ReadAll(resp.Body)
+	if err != nil {
+		fmt.Printf("❌ Failed to read response body: %v\n", err)
+		os.Exit(1)
+	}
 
-	// Save the file
-	out, _ := os.Create(filepath.Join(cacheDir, fmt.Sprintf("%s.csv", ticker)))
-	defer out.Close()
-	io.Copy(out, resp.Body)
+	bodyString := string(bodyBytes)
 
-	fmt.Printf("✅ Success: Downloaded %s\n", ticker)
+	// CRITICAL CHECK: If the response starts with '{', it's a JSON error, not a CSV
+	if len(bodyString) > 0 && bodyString[0] == '{' {
+		fmt.Printf("❌ API Error Detected!\n")
+		fmt.Printf("Alpha Vantage returned: %s\n", bodyString)
+		fmt.Println("Check if your API key is valid or if you reached the daily limit (25 requests).")
+		os.Exit(1) 
+	}
+
+	// Ensure the cache directory exists in the backend folder
+	cwd, _ := os.Getwd()
+	cacheDir := filepath.Join(cwd, "backend", "cache_data")
+	if _, err := os.Stat(cacheDir); os.IsNotExist(err) {
+		err := os.MkdirAll(cacheDir, 0777)
+		if err != nil {
+			fmt.Printf("❌ Directory Error: %v\n", err)
+			os.Exit(1)
+		}
+	}
+
+	// Create and write the CSV file
+	fileName := filepath.Join(cacheDir, fmt.Sprintf("%s.csv", ticker))
+	err = os.WriteFile(fileName, bodyBytes, 0644)
+	if err != nil {
+		fmt.Printf("❌ File Write Error: %v\n", err)
+		os.Exit(1)
+	}
+
+	fmt.Printf("✅ Success: Downloaded and saved %s.csv\n", ticker)
 }
