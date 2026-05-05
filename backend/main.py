@@ -16,12 +16,12 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
-# 2. Path Configuration for Render
+# 2. Path Configuration for Docker/Render
 BASE_DIR = "/app"
 CACHE_DIR = os.path.join(BASE_DIR, "backend", "cache_data")
 
 def fetch_data_with_go(ticker: str):
-    """Triggers the Go binary to fetch data."""
+    """Triggers the pre-compiled Go binary to fetch data."""
     try:
         binary_path = os.path.join(BASE_DIR, "backend", "ingestor")
         
@@ -45,9 +45,6 @@ def fetch_data_with_go(ticker: str):
         print(f"STDOUT: {e.stdout}", flush=True)
         print(f"STDERR: {e.stderr}", flush=True)
         return False
-    except Exception as e:
-        print(f"❌ Python Orchestration Error: {e}", flush=True)
-        return False
 
 @app.get("/api/regimes/{ticker}")
 async def get_market_data(ticker: str):
@@ -55,62 +52,70 @@ async def get_market_data(ticker: str):
     file_path = os.path.join(CACHE_DIR, f"{ticker}.csv")
     
     # --- SMART CACHE LOGIC ---
-    # Only run the Go Ingestor if the file doesn't exist.
-    # This saves your Alpha Vantage 25-request-per-day limit!
     if not os.path.exists(file_path):
         print(f"--- 🌐 {ticker} not in cache. Calling API... ---", flush=True)
         success = fetch_data_with_go(ticker)
         if not success:
-            return {"error": "API limit reached or Ticker not found. Try again later."}
+            return {"error": "API limit reached or Ticker not found. Check logs."}
     else:
         print(f"--- 💾 {ticker} found in cache. Skipping API call. ---", flush=True)
 
-    # Verify the file actually exists now
-    if not os.path.exists(file_path):
-        return {"error": f"Data file {ticker}.csv missing after attempt."}
-
     try:
-        # Load and handle headers
+        # 3. Load and Standardize CSV Data
         df = pd.read_csv(file_path)
-        df.columns = [c.lower().strip() for c in df.columns]
         
-        # Standardize Alpha Vantage / Yahoo headers
+        # Clean column names (strip spaces, lowercase, remove quotes)
+        df.columns = [c.lower().strip().replace('"', '').replace("'", "") for c in df.columns]
+        print(f"--- 📊 Columns found in CSV: {list(df.columns)} ---", flush=True)
+        
+        # Comprehensive Mapping: Supports Alpha Vantage, Yahoo, and CSV exports
         rename_map = {
             'timestamp': 'date',
             'time': 'date',
-            'adjusted_close': 'close'
+            'adjusted_close': 'close',
+            'adjusted close': 'close'
         }
-        df = df.rename(columns=rename_map)
+        
+        # Apply renaming safely
+        for old_col, new_col in rename_map.items():
+            if old_col in df.columns and new_col not in df.columns:
+                df = df.rename(columns={old_col: new_col})
 
-        if 'close' not in df.columns:
-            # If we accidentally cached a JSON error message, delete it so we can try again later
-            os.remove(file_path)
-            return {"error": "Invalid data format received. Cache cleared."}
+        # --- VALIDATION ---
+        # If the file starts with '{', it's a JSON error saved as a CSV.
+        if df.columns[0] == '{' or 'date' not in df.columns:
+            print(f"--- 🗑️ Deleting invalid cache file: {file_path} ---", flush=True)
+            os.remove(file_path) # Delete so next attempt can retry fresh
+            return {"error": "The cached file was invalid or empty. Try again in 60 seconds."}
 
-        # Data Cleaning
+        # 4. Data Processing
         df['date'] = pd.to_datetime(df['date'])
         df = df.sort_values('date')
         
-        # ML Logic
+        # Calculate features for GMM
         df['Returns'] = np.log(df['close'] / df['close'].shift(1))
         df['Volatility'] = df['Returns'].rolling(window=20).std()
         df = df.dropna()
 
-        if len(df) < 20:
-            return {"error": "Not enough data points for analysis."}
+        if len(df) < 30:
+            return {"error": "Insufficient data (need at least 30 valid days)."}
 
+        # 5. Machine Learning Logic: Regime Detection
         X = df[['Returns', 'Volatility']].values
-        gmm = GaussianMixture(n_components=3, random_state=42)
+        gmm = GaussianMixture(n_components=3, random_state=42, covariance_type='full')
         df['Regime'] = gmm.fit_predict(X)
 
-        # Format for React
+        # 6. Return Clean JSON for React
         result_df = df.rename(columns={'date': 'Date', 'close': 'Close'})
         return result_df[['Date', 'Close', 'Regime']].to_dict(orient='records')
 
     except Exception as e:
-        print(f"❌ Processing Error: {e}", flush=True)
-        return {"error": f"Processing failed: {str(e)}"}
+        print(f"❌ Processing Error: {str(e)}", flush=True)
+        # If processing fails, it's often a corrupted file—delete it to be safe.
+        if os.path.exists(file_path):
+            os.remove(file_path)
+        return {"error": f"Internal processing error: {str(e)}"}
 
 @app.get("/health")
 async def health():
-    return {"status": "online"}
+    return {"status": "online", "cache_ready": os.path.exists(CACHE_DIR)}
