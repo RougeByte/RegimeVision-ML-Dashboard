@@ -8,6 +8,7 @@ function App() {
   const [data, setData] = useState([]);
   const [loading, setLoading] = useState(true);
   
+  // PERSISTENCE: Initialize state from localStorage or default to AAPL
   const [ticker, setTicker] = useState(() => {
     return localStorage.getItem('selectedTicker') || 'AAPL';
   });
@@ -15,13 +16,15 @@ function App() {
   const [searchInput, setSearchInput] = useState('');
   const [isDropdownOpen, setIsDropdownOpen] = useState(false);
 
+  // Updated List: Using .NSE for Alpha Vantage compatibility where applicable
   const tickerList = [
     { symbol: "AAPL", name: "Apple Inc" },
     { symbol: "TSLA", name: "Tesla Inc" },
     { symbol: "NVDA", name: "NVIDIA Corp" },
-    { symbol: "RELIANCE.NSE", name: "Reliance NSE" },
-    { symbol: "INFY.NSE", name: "Infosys NSE" },
-    { symbol: "BTC", name: "Bitcoin" }
+    { symbol: "RELIANCE.NSE", name: "Reliance Industries" },
+    { symbol: "INFY.NSE", name: "Infosys Ltd" },
+    { symbol: "BTC", name: "Bitcoin" },
+    { symbol: "ETH", name: "Ethereum" }
   ];
 
   const filteredTickers = tickerList.filter(t => 
@@ -32,24 +35,23 @@ function App() {
   const fetchData = async () => {
     setLoading(true);
     try {
-      // Standardize ticker for API call
       const res = await axios.get(`https://regimevision-backend1.onrender.com/api/regimes/${ticker}`);
       
       if (res.data.error) {
-        console.error("API Error:", res.data.error);
+        console.error("Backend Error:", res.data.error);
         setData([]);
       } else {
-        // MAP DATA TO LIGHTWEIGHT CHARTS FORMAT
+        // MAP DATA: Convert Backend keys (Date, Close) to Chart keys (time, value)
         const formattedData = res.data.map(item => ({
-          time: item.Date,      // Matches 'Date' from main.py
-          value: item.Close,    // Matches 'Close' from main.py
-          regime: item.Regime   // Matches 'Regime' from main.py
+          time: item.Date,      // From main.py 'Date'
+          value: item.Close,    // From main.py 'Close'
+          regime: item.Regime   // From main.py 'Regime'
         }));
         setData(formattedData);
         localStorage.setItem('selectedTicker', ticker);
       }
     } catch (err) {
-      console.error("Backend Connection Error:", err);
+      console.error("Network Error:", err);
     } finally {
       setLoading(false);
     }
@@ -59,6 +61,7 @@ function App() {
     fetchData(); 
   }, [ticker]);
 
+  // Chart Logic
   useEffect(() => {
     if (loading || !data.length || !chartContainerRef.current) return;
 
@@ -69,7 +72,7 @@ function App() {
       grid: { vertLines: { color: '#1e293b' }, horzLines: { color: '#1e293b' } },
     });
 
-    // Use AreaSeries for cleaner GMM visualization
+    // Switched to AreaSeries to handle the single-price data points
     const mainSeries = chart.addSeries(AreaSeries, {
       lineColor: '#38bdf8',
       topColor: 'rgba(56, 189, 248, 0.3)',
@@ -79,7 +82,7 @@ function App() {
 
     mainSeries.setData(data);
 
-    // Apply GMM Markers
+    // Apply GMM Markers using the stabilized 'Regime' key
     try {
       const markers = data.map(item => {
         if (item.regime === 1) return { time: item.time, position: 'aboveBar', color: '#ef4444', shape: 'arrowDown', text: 'BEAR' };
@@ -87,18 +90,12 @@ function App() {
         return null;
       }).filter(Boolean);
       mainSeries.setMarkers(markers);
-    } catch (e) {
-        console.error("Marker Error:", e);
-    }
+    } catch (e) {}
 
     chart.timeScale().fitContent();
     const handleResize = () => chart.applyOptions({ width: chartContainerRef.current.clientWidth });
     window.addEventListener('resize', handleResize);
-    
-    return () => { 
-      window.removeEventListener('resize', handleResize); 
-      chart.remove(); 
-    };
+    return () => { window.removeEventListener('resize', handleResize); chart.remove(); };
   }, [loading, data]);
 
   const lastPoint = data[data.length - 1];
@@ -113,7 +110,7 @@ function App() {
   return (
     <div style={{ padding: '20px 5%', backgroundColor: '#020617', minHeight: '100vh', color: 'white', fontFamily: 'Inter, sans-serif', boxSizing: 'border-box' }}>
       
-      {/* Navbar */}
+      {/* Navbar Area */}
       <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '30px', gap: '20px', flexWrap: 'wrap' }}>
         <div style={{ display: 'flex', alignItems: 'center', gap: '12px' }}>
              <div style={{ backgroundColor: '#0f172a', padding: '8px', borderRadius: '8px', border: '1px solid #1e293b' }}>
@@ -122,14 +119,16 @@ function App() {
              <h1 style={{ margin: 0, fontSize: '22px', fontWeight: 'bold' }}>Regime<span style={{ color: '#38bdf8' }}>Vision</span></h1>
         </div>
 
+        {/* Search Input */}
         <div style={{ position: 'relative', flex: '1 1 300px', maxWidth: '400px' }}>
           <div style={{ position: 'relative' }}>
             <Search size={18} style={{ position: 'absolute', left: '12px', top: '12px', color: '#64748b', zIndex: 10 }} />
             <input 
               type="text" 
-              placeholder="Search Ticker (e.g. AAPL, RELIANCE.NSE)..." 
+              placeholder="Search (e.g. AAPL, RELIANCE.NSE)..." 
               value={searchInput}
               onFocus={() => setIsDropdownOpen(true)}
+              // Added delay to let the click on the dropdown item fire first
               onBlur={() => setTimeout(() => setIsDropdownOpen(false), 200)}
               onChange={(e) => setSearchInput(e.target.value)}
               onKeyDown={(e) => {
@@ -146,10 +145,17 @@ function App() {
             />
           </div>
 
+          {/* Dropdown Menu */}
           {isDropdownOpen && (
-            <div style={{ position: 'absolute', top: '55px', left: 0, right: 0, backgroundColor: '#0f172a', border: '1px solid #1e293b', borderRadius: '10px', zIndex: 100, maxHeight: '200px', overflowY: 'auto' }}>
+            <div style={{ position: 'absolute', top: '55px', left: 0, right: 0, backgroundColor: '#0f172a', border: '1px solid #1e293b', borderRadius: '10px', zIndex: 100, maxHeight: '250px', overflowY: 'auto' }}>
               {filteredTickers.map((t) => (
-                <div key={t.symbol} onClick={() => { setTicker(t.symbol); setSearchInput(''); }}
+                <div key={t.symbol} 
+                  // Use onMouseDown to trigger before the input loses focus
+                  onMouseDown={(e) => {
+                    setTicker(t.symbol);
+                    setSearchInput('');
+                    setIsDropdownOpen(false);
+                  }}
                   style={{ padding: '12px 16px', cursor: 'pointer', borderBottom: '1px solid #1e293b' }}>
                   <div style={{ fontWeight: 'bold' }}>{t.symbol}</div>
                   <div style={{ fontSize: '11px', color: '#64748b' }}>{t.name}</div>
@@ -160,11 +166,11 @@ function App() {
         </div>
       </div>
 
-      {/* Cards */}
+      {/* Analysis Cards */}
       <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(300px, 1fr))', gap: '20px', marginBottom: '20px' }}>
         <div style={{ backgroundColor: '#0f172a', border: '1px solid #1e293b', borderRadius: '16px', padding: '24px', display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
           <div>
-            <span style={{ color: '#64748b', textTransform: 'uppercase', fontSize: '11px', fontWeight: 'bold' }}>Market Status: {ticker}</span>
+            <span style={{ color: '#64748b', textTransform: 'uppercase', fontSize: '11px', fontWeight: 'bold' }}>Ticker: {ticker}</span>
             <div style={{ display: 'flex', alignItems: 'center', gap: '15px', marginTop: '10px' }}>
               <div style={{ color: status.color, backgroundColor: `${status.color}15`, padding: '8px', borderRadius: '8px' }}>{status.icon}</div>
               <h2 style={{ margin: 0, fontSize: '32px', color: status.color, fontWeight: '800' }}>{status.label}</h2>
@@ -176,29 +182,25 @@ function App() {
           </div>
         </div>
         <div style={{ backgroundColor: '#0f172a', border: '1px solid #1e293b', borderRadius: '16px', padding: '24px', display: 'flex', alignItems: 'center', fontSize: '13px', color: '#94a3b8' }}>
-          <p><strong>GMM Insight:</strong> Historical volatility and return clustering suggest {ticker} is currently in a <strong>{status.label.toLowerCase()}</strong> regime. This is calculated using Gaussian Mixture Models on the backend ingestor.</p>
+          <p>GMM Analysis: High-volatility clusters detected. The <strong>Gaussian Mixture Model</strong> suggests a primary <strong>{status.label.toLowerCase()}</strong> regime based on recent price action.</p>
         </div>
       </div>
 
-      {/* Chart */}
+      {/* Chart Section */}
       <div style={{ backgroundColor: '#0f172a', border: '1px solid #1e293b', borderRadius: '20px', padding: '15px' }}>
         {loading ? (
           <div style={{ height: '450px', display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', gap: '15px' }}>
             <RefreshCcw className="animate-spin" color="#38bdf8" size={32} />
-            <p style={{ color: '#64748b' }}>Processing API Data...</p>
+            <p style={{ color: '#64748b' }}>Running Go Ingestor...</p>
           </div>
         ) : data.length === 0 ? (
           <div style={{ height: '450px', display: 'flex', alignItems: 'center', justifyContent: 'center', color: '#64748b' }}>
-            No data found for this ticker. Try AAPL or RELIANCE.NSE
+            No data. Please check ticker format or API limits.
           </div>
         ) : (
           <div ref={chartContainerRef} style={{ borderRadius: '10px', overflow: 'hidden' }} />
         )}
       </div>
-      
-      <footer style={{ marginTop: '20px', textAlign: 'center', color: '#1e293b', fontSize: '11px' }}>
-        Built with Go, Python (GMM), and React • {ticker}
-      </footer>
     </div>
   );
 }
